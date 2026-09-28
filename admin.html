@@ -158,19 +158,25 @@
         <div id="past-events-container" class="grid">Loading...</div>
       </div>
 
-      <!-- PORTFOLIO & REVIEWS -->
+      <!-- PORTFOLIO / CONTENT EDITOR -->
       <div id="content" class="tab-content">
         <div class="glass-panel">
-          <h3><i class="fas fa-plus-square"></i> Add Portfolio Item</h3>
+          <h3 id="cont-header"><i class="fas fa-plus-square"></i> Add Portfolio Item</h3>
           <form id="content-form">
+            <input type="hidden" id="cont-id">
             <select id="cont-category" required><option value="">Select Category...</option><option value="projects">Digital Infrastructure</option><option value="leadership">Leadership & Operations</option><option value="research">Academic & Data</option></select>
-            <input type="text" id="cont-title" placeholder="Item Title" required><input type="text" id="cont-date" placeholder="Date / Subtitle"><textarea id="cont-desc" rows="3" placeholder="Description" required></textarea><input type="text" id="cont-icon" placeholder="FontAwesome Class (e.g. fas fa-flag)" required>
-            <button type="submit">Push to Portfolio</button>
+            <input type="text" id="cont-title" placeholder="Item Title" required>
+            <input type="text" id="cont-date" placeholder="Date / Subtitle">
+            <textarea id="cont-desc" rows="3" placeholder="Description" required></textarea>
+            <input type="text" id="cont-icon" placeholder="FontAwesome Class (e.g. fas fa-flag)" required>
+            <button type="submit" id="cont-submit-btn">Push to Portfolio</button>
+            <button type="button" id="cont-cancel-btn" style="display:none; margin-top:10px;" class="btn-outline">Cancel Edit</button>
           </form>
         </div>
         <div id="content-container" class="grid"></div>
       </div>
 
+      <!-- REVIEWS -->
       <div id="reviews" class="tab-content">
         <div class="glass-panel" style="background:transparent; border:none; padding:0;"><div id="reviews-container" class="grid"></div></div>
       </div>
@@ -182,9 +188,9 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
   import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-  import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-  // 🔴 LIVE CONFIG 🔴
+  // 🔴 LIVE FIREBASE CONFIG 🔴
   const firebaseConfig = {
     apiKey: "AIzaSyCYZvEC_V9l4d4bPo6AvUOWiAj8WemcDwQ",
     authDomain: "lyon-portfolio.firebaseapp.com",
@@ -201,6 +207,8 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
+
+  let allContentData = {}; // Stores content for editing
 
   const showToast = (msg, isError = false) => {
     const t = document.getElementById('toast');
@@ -291,7 +299,27 @@
       document.getElementById('prof-title').value = p.title || '';
       document.getElementById('prof-bio').value = p.bio || '';
     }
-    loadCollection("portfolio_items", "content-container", (i, id) => `<div class="data-card"><span class="badge">${i.category}</span><h4 style="color:#fff;"><i class="${i.icon}" style="color:var(--cyan); margin-right:5px;"></i> ${i.title}</h4><p style="font-size:0.8rem; color:var(--muted); margin:10px 0;">${i.desc}</p><button onclick="deleteDocItem('portfolio_items', '${id}')" class="btn-danger"><i class="fas fa-trash"></i> Remove</button></div>`);
+    
+    // Load Portfolio Items with Edit Capability
+    const contentBox = document.getElementById('content-container');
+    contentBox.innerHTML = '';
+    allContentData = {};
+    const cSnap = await getDocs(collection(db, "portfolio_items"));
+    cSnap.forEach(d => {
+      const i = d.data();
+      allContentData[d.id] = i; // Save data for editing
+      contentBox.innerHTML += `
+        <div class="data-card">
+          <span class="badge">${i.category}</span>
+          <h4 style="color:#fff;"><i class="${i.icon}" style="color:var(--cyan); margin-right:5px;"></i> ${i.title}</h4>
+          <p style="font-size:0.8rem; color:var(--muted); margin:10px 0;">${i.desc}</p>
+          <div style="display:flex; gap:10px;">
+            <button onclick="editContent('${d.id}')" class="btn-outline" style="width:auto; padding:8px 16px; font-size:0.85rem;"><i class="fas fa-edit"></i> Edit</button>
+            <button onclick="deleteDocItem('portfolio_items', '${d.id}')" class="btn-danger" style="margin:0;"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>`;
+    });
+
     loadCollection("events", "events-container", (i, id) => `<div class="data-card">${i.flyerUrl ? `<img src="${i.flyerUrl}" class="data-img">` : ''}<span class="badge">${i.date}</span><h4 style="color:#fff;">${i.title}</h4><button onclick="deleteDocItem('events', '${id}')" class="btn-danger" style="margin-top:10px;"><i class="fas fa-trash"></i> Remove</button></div>`);
     loadCollection("past_events", "past-events-container", (i, id) => `<div class="data-card"><img src="${i.imgUrl}" class="data-img"><h4 style="color:#fff;">${i.title}</h4><button onclick="deleteDocItem('past_events', '${id}')" class="btn-danger" style="margin-top:10px;"><i class="fas fa-trash"></i> Remove</button></div>`);
     
@@ -310,7 +338,7 @@
     snap.forEach(d => { box.innerHTML += htmlFormatter(d.data(), d.id); });
   }
 
-  // SUBMIT FORMS
+  // --- SUBMIT FORMS ---
   document.getElementById('profile-form').addEventListener('submit', async (e) => {
     e.preventDefault(); const btn = document.getElementById('prof-btn'); btn.innerText = "Uploading & Deploying...";
     try {
@@ -355,14 +383,53 @@
     } catch(err) { showToast("Upload failed.", true); btn.innerText = "Add to Carousel"; console.error(err); }
   });
 
+  // --- PORTFOLIO EDIT/ADD LOGIC ---
+  window.editContent = (id) => {
+    const data = allContentData[id];
+    document.getElementById('cont-id').value = id;
+    document.getElementById('cont-category').value = data.category;
+    document.getElementById('cont-title').value = data.title;
+    document.getElementById('cont-date').value = data.date || '';
+    document.getElementById('cont-desc').value = data.desc;
+    document.getElementById('cont-icon').value = data.icon;
+    
+    document.getElementById('cont-header').innerHTML = '<i class="fas fa-edit"></i> Edit Portfolio Item';
+    document.getElementById('cont-submit-btn').innerText = "Update Item";
+    document.getElementById('cont-cancel-btn').style.display = "block";
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  document.getElementById('cont-cancel-btn').addEventListener('click', () => {
+    document.getElementById('content-form').reset();
+    document.getElementById('cont-id').value = '';
+    document.getElementById('cont-header').innerHTML = '<i class="fas fa-plus-square"></i> Add Portfolio Item';
+    document.getElementById('cont-submit-btn').innerText = "Push to Portfolio";
+    document.getElementById('cont-cancel-btn').style.display = "none";
+  });
+
   document.getElementById('content-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, "portfolio_items"), {
+    const id = document.getElementById('cont-id').value;
+    const data = {
       category: document.getElementById('cont-category').value, title: document.getElementById('cont-title').value,
       date: document.getElementById('cont-date').value, desc: document.getElementById('cont-desc').value,
-      icon: document.getElementById('cont-icon').value, createdAt: new Date()
-    });
-    e.target.reset(); showToast("Portfolio Item Added."); loadAllData();
+      icon: document.getElementById('cont-icon').value
+    };
+
+    try {
+      if (id) {
+        await updateDoc(doc(db, "portfolio_items", id), data);
+        showToast("Portfolio Item Updated.");
+      } else {
+        data.createdAt = new Date();
+        await addDoc(collection(db, "portfolio_items"), data);
+        showToast("Portfolio Item Added.");
+      }
+      document.getElementById('cont-cancel-btn').click(); // trigger form reset
+      loadAllData();
+    } catch (err) {
+      showToast("Error saving content.", true);
+    }
   });
 
   window.deleteDocItem = async (col, id) => {
