@@ -293,30 +293,126 @@ footer { padding: 40px 0; text-align: center; color: var(--muted); border-top: 1
   </div>
 </footer>
 
-<script>
-  // Mouse hover glow effect for App Cards
+<script type="module">
+  // Import the modern Firebase SDK via CDN for pure HTML/JS compatibility
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-analytics.js";
+  import { getFirestore, doc, getDoc, setDoc, updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+  // Your live Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyCYZvEC_V9l4d4bPo6AvUOWiAj8WemcDwQ",
+    authDomain: "lyon-portfolio.firebaseapp.com",
+    projectId: "lyon-portfolio",
+    storageBucket: "lyon-portfolio.firebasestorage.app",
+    messagingSenderId: "297623716417",
+    appId: "1:297623716417:web:12d8a738aec0174ee07cc0",
+    measurementId: "G-Q8JPRJKNSG"
+  };
+
+  // Initialize Firebase, Analytics, and Firestore
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  const db = getFirestore(app);
+
+  // Hover effect for App Cards
   document.querySelectorAll('.app-card').forEach(card => {
     card.addEventListener('mousemove', e => {
       const rect = card.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      card.style.setProperty('--mouse-x', `${x}px`);
-      card.style.setProperty('--mouse-y', `${y}px`);
+      card.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
+      card.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
     });
   });
 
   // Scroll Reveal Observer
-  const observerOptions = { root: null, rootMargin: '0px', threshold: 0.1 };
-  const observer = new IntersectionObserver((entries, observer) => {
+  const observer = new IntersectionObserver((entries, obs) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         entry.target.classList.add('active');
-        observer.unobserve(entry.target);
+        obs.unobserve(entry.target);
       }
     });
-  }, observerOptions);
-  
+  }, { threshold: 0.1 });
   document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // --- FIREBASE STAR RATING LOGIC ---
+  const ratingModules = document.querySelectorAll('.rating-module');
+
+  ratingModules.forEach(module => {
+    const targetId = module.getAttribute('data-target');
+    const stars = module.querySelectorAll('i');
+    const scoreText = module.querySelector('span');
+
+    // 1. Fetch existing ratings on load
+    const fetchRatings = async () => {
+      try {
+        const docRef = doc(db, "ratings", targetId);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const avg = (data.totalScore / data.votes).toFixed(1);
+          scoreText.innerText = `${avg} ★ (${data.votes} votes)`;
+          
+          // Fill stars based on average
+          stars.forEach((star, index) => {
+            if (index < Math.round(avg)) {
+              star.classList.remove('far');
+              star.classList.add('fas');
+              star.style.color = '#fde047'; // Yellow
+            }
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching ratings:", error);
+      }
+    };
+    fetchRatings();
+
+    // 2. Handle User Clicking a Star
+    stars.forEach((star, index) => {
+      const ratingValue = index + 1;
+      
+      // Hover effect
+      star.addEventListener('mouseenter', () => {
+        stars.forEach((s, i) => {
+          s.style.color = i <= index ? '#fde047' : '';
+          s.className = i <= index ? 'fas fa-star' : 'far fa-star';
+        });
+      });
+
+      // Mouse leave (reset display)
+      module.addEventListener('mouseleave', fetchRatings); 
+
+      // Click to vote
+      star.addEventListener('click', async () => {
+        scoreText.innerText = "Saving...";
+        try {
+          const docRef = doc(db, "ratings", targetId);
+          const docSnap = await getDoc(docRef);
+
+          if (docSnap.exists()) {
+            await updateDoc(docRef, {
+              totalScore: increment(ratingValue),
+              votes: increment(1)
+            });
+          } else {
+            await setDoc(docRef, {
+              totalScore: ratingValue,
+              votes: 1
+            });
+          }
+          
+          // Temporarily disable clicking again to prevent spam
+          module.style.pointerEvents = 'none';
+          fetchRatings();
+        } catch (error) {
+          console.error("Error saving rating:", error);
+          scoreText.innerText = "Error saving";
+        }
+      });
+    });
+  });
 </script>
 </body>
 </html>
